@@ -17,113 +17,217 @@ def load_and_binarize_image(image_path, threshold=128):
     加载图像并转换为二值数组
     
     参数：
-    image_path -- 图像文件路径（字符串）
-    threshold -- 二值化阈值（0-255之间的整数，默认128）
+    image_path : str
+        图像文件路径，支持常见格式（PNG/JPG等）
+    threshold : int, optional
+        二值化阈值（0-255），默认128。大于等于阈值的像素设为1，否则为0
     
     返回：
-    二值化的NumPy数组（0和1组成）
-    
-    实现步骤：
-    1. 使用PIL.Image打开图像并转换为灰度
-    2. 转换为NumPy数组
-    3. 根据阈值进行二值化处理
+    binary : ndarray
+        二值化的NumPy数组，数据类型为uint8，值域{0, 1}
+
     """
-    # TODO: 实现图像加载和二值化
-    # ... your code here ...
-    pass
+    # 加载并转换图像
+    img = Image.open(image_path).convert('L')  # 转为灰度图像
+    img_array = np.array(img)  # 转为numpy数组
+    
+    # 二值化处理（注意：这里将True(1)设为前景，可根据图像实际情况反转）
+    binary = (img_array >= threshold).astype(np.uint8)
+    
+    # 可选：显示处理后的图像用于调试
+    # Image.fromarray(binary * 255).show()  
+    return binary
 
 def box_count(binary_image, box_sizes):
     """
-    盒计数算法实现
+    盒计数算法核心实现
     
     参数：
-    binary_image -- 二值图像数组（0和1组成的NumPy数组）
-    box_sizes -- 盒子尺寸列表（整数列表）
+    binary_image : ndarray
+        二值图像数组，形状为(H, W)，元素为0或1
+    box_sizes : list of int
+        要测试的盒子尺寸列表（建议使用递减尺寸）
     
     返回：
-    字典 {box_size: count}，记录每个盒子尺寸对应的非空盒子数量
-    
-    实现步骤：
-    1. 获取图像高度和宽度
-    2. 遍历每个盒子尺寸：
-       a. 计算网格行列数
-       b. 遍历所有盒子区域
-       c. 统计包含前景像素的盒子数量
+    counts : dict
+        字典，键为盒子尺寸，值为对应的非空盒子数量
+
     """
-    # TODO: 实现盒计数算法
-    # ... your code here ...
-    pass
+    counts = {}
+    h, w = binary_image.shape
+    
+    for s in box_sizes:
+        if s <= 0:  # 跳过无效尺寸
+            continue
+            
+        count = 0
+        # 计算纵向和横向的网格数（向上取整）
+        rows = (h + s - 1) // s  
+        cols = (w + s - 1) // s
+        
+        for i in range(rows):
+            # 计算当前网格纵向范围
+            r_start = i * s
+            r_end = min(r_start + s, h)  # 防止越界
+            
+            for j in range(cols):
+                # 计算当前网格横向范围
+                c_start = j * s
+                c_end = min(c_start + s, w)
+                
+                # 提取当前盒子区域
+                box = binary_image[r_start:r_end, c_start:c_end]
+                
+                # 检测是否包含至少一个前景像素（值为1）
+                if np.any(box == 1):
+                    count += 1
+        
+        counts[s] = count
+    
+    return counts
 
 def calculate_fractal_dimension(binary_image, min_box_size=1, max_box_size=None, num_sizes=10):
     """
-    计算分形维数
+    计算分形维数及相关数据
     
     参数：
-    binary_image -- 二值图像数组
-    min_box_size -- 最小盒子尺寸（默认1）
-    max_box_size -- 最大盒子尺寸（默认图像最小尺寸的一半）
-    num_sizes -- 盒子尺寸数量（默认10）
+    binary_image : ndarray
+        二值图像数组
+    min_box_size : int, optional
+        最小盒子尺寸，默认1（最小分辨率）
+    max_box_size : int, optional
+        最大盒子尺寸，默认取图像短边的一半
+    num_sizes : int, optional
+        生成的盒子尺寸数量，默认10
     
     返回：
-    盒维数D, 元组(epsilons, N_epsilons, slope, intercept)
-    
-    实现步骤：
-    1. 生成等比数列的盒子尺寸
-    2. 调用box_count获取计数结果
-    3. 对结果进行对数变换
-    4. 使用线性回归计算斜率
+    D : float
+        估算的分形维数
+    results : tuple
+        (epsilons, N_epsilons, slope, intercept)
+        - epsilons: 实际使用的盒子尺寸数组
+        - N_epsilons: 对应的盒子计数数组
+        - slope: 拟合直线斜率
+        - intercept: 拟合直线截距
+
     """
-    # TODO: 实现分形维数计算
-    # ... your code here ...
-    pass
+    h, w = binary_image.shape
+    
+    # 设置最大盒子尺寸
+    if max_box_size is None:
+        max_box_size = min(h, w) // 2  # 防止盒子尺寸过大导致网格划分过粗
+    max_box_size = max(max_box_size, min_box_size)  # 确保max >= min
+    
+    # 生成等比数列（几何级数），确保尺寸逐渐减小
+    epsilons = np.geomspace(
+        start=max_box_size,  # 从最大尺寸开始
+        stop=min_box_size,  # 到最小尺寸结束
+        num=num_sizes
+    ).astype(int)
+    
+    # 去重并排序（从大到小）
+    epsilons = np.unique(epsilons)[::-1]  
+    
+    # 过滤超出范围的尺寸
+    epsilons = epsilons[(epsilons >= min_box_size) & (epsilons <= max_box_size)]
+    
+    # 执行盒计数
+    counts_dict = box_count(binary_image, epsilons)
+    epsilons = np.array(list(counts_dict.keys()))
+    N_epsilons = np.array(list(counts_dict.values()))
+    
+    # 数据有效性检查（至少需要2个数据点）
+    valid = N_epsilons > 0
+    epsilons = epsilons[valid]
+    N_epsilons = N_epsilons[valid]
+    
+    if len(epsilons) < 2:
+        raise ValueError("有效数据点不足，无法进行线性回归")
+    
+    # 对数变换
+    log_eps = np.log(epsilons)
+    log_N = np.log(N_epsilons)
+    
+    # 线性回归（一阶多项式拟合）
+    slope, intercept = np.polyfit(log_eps, log_N, 1)
+    D = -slope  # 分形维数
+    
+    return D, (epsilons, N_epsilons, slope, intercept)
 
 def plot_log_log(epsilons, N_epsilons, slope, intercept, save_path=None):
     """
-    绘制log-log图
+    绘制log-log图用于可视化验证
     
     参数：
-    epsilons -- 盒子尺寸列表
-    N_epsilons -- 对应的盒子计数列表
-    slope -- 拟合直线斜率
-    intercept -- 拟合直线截距
-    save_path -- 图片保存路径（可选）
+    epsilons : array_like
+        盒子尺寸数组
+    N_epsilons : array_like
+        对应的盒子计数数组
+    slope : float
+        拟合直线斜率
+    intercept : float
+        拟合直线截距
+    save_path : str, optional
+        图像保存路径，如未指定则显示在窗口中
     
-    实现步骤：
-    1. 对数变换
-    2. 绘制散点图
-    3. 绘制拟合直线
-    4. 添加标签和图例
+    图像说明：
+    - 散点：实际数据点(log(ε), log(N(ε)))
+    - 红线：拟合直线，标注计算得到的分形维数
     """
-    # TODO: 实现log-log图绘制
-    # ... your code here ...
-    pass
+    plt.figure(figsize=(8, 6))
+    
+    # 计算坐标
+    log_eps = np.log(epsilons)
+    log_N = np.log(N_epsilons)
+    fit_line = slope * log_eps + intercept
+    
+    # 绘制散点图
+    plt.scatter(
+        log_eps, log_N,
+        color='blue', marker='o',
+        label='Data points',
+        zorder=10  # 确保散点在前景
+    )
+    
+    # 绘制拟合直线
+    plt.plot(
+        log_eps, fit_line,
+        color='red', linestyle='--',
+        label=f'Fit line (D = {-slope:.3f})'
+    )
+    
+    # 图例和标签
+    plt.xlabel('log(ε)', fontsize=12)
+    plt.ylabel('log(N(ε))', fontsize=12)
+    plt.title('Box Counting Method - log-log plot', fontsize=14)
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    # 保存或显示
+    if save_path:
+        plt.savefig(save_path)
+    plt.show()
 
 if __name__ == "__main__":
-    """
-    主函数 - 测试你的实现
+    # 使用说明 -------------------------------------------------
+    # 1. 将box.png放在项目images目录下
+    # 2. 根据需要调整阈值参数
     
-    实现步骤：
-    1. 加载并二值化图像
-    2. 计算分形维数
-    3. 输出结果
-    4. 绘制log-log图
-    
-    测试说明：
-    1. 使用项目提供的测试图像或自己准备的图像
-    2. 比较计算结果与理论值
-    """
-    # TODO: 实现主函数测试
-    # 示例路径，请根据实际情况修改
-    IMAGE_PATH = "../../images/barnsley_fern.png"  
-    
-    # 1. 加载并二值化图像
-    # binary_img = load_and_binarize_image(IMAGE_PATH)
+    # 配置参数
+    IMAGE_PATHS = "box.png"
+    binary_img = load_and_binarize_image(IMAGE_PATHS)
     
     # 2. 计算分形维数
-    # D, results = calculate_fractal_dimension(binary_img)
+    D, (epsilons, N_epsilons, slope, intercept) = calculate_fractal_dimension(binary_img)
     
     # 3. 输出结果
-    # print(f"估算的盒维数 D = {D:.5f}")
+    print("盒计数结果:")
+    for eps, N in zip(epsilons, N_epsilons):
+        print(f"ε = {eps:4d}, N(ε) = {N:6d}, log(ε) = {np.log(eps):.3f}, log(N) = {np.log(N):.3f}")
+    
+    print(f"\n拟合斜率: {slope:.5f}")
+    print(f"估算的盒维数 D = {D:.5f}")
     
     # 4. 绘制log-log图
-    # plot_log_log(*results[1:], "log_log_plot.png")
+    plot_log_log(epsilons, N_epsilons, slope, intercept, "log_log_plot.png")
+
